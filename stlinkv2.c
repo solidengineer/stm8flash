@@ -271,6 +271,9 @@ static void swim_cmd_internal(programmer_t *pgm, unsigned char *buf, unsigned in
 		usleep(10000);
 		//usleep(100);
 	}
+
+    fflush(stdout);
+    usleep(10000);
 	ERROR2("SWIM error 0x%02d\n", status[set][0]);
 }
 
@@ -325,7 +328,7 @@ bool stlink2_open(programmer_t *pgm) {
 	stlink2_cmd(pgm, 1, STLINK_GET_VERSION);
 	msg_recv(pgm, buf, 6);
 	v = (buf[0] << 8) | buf[1];
-	fprintf(stderr, "STLink: v%d, JTAG: v%d, SWIM: v%d, VID: %02x%02x, PID: %02x%02x\n",
+	fprintf(stdout, "STLink: v%d, JTAG: v%d, SWIM: v%d, VID: %02x%02x, PID: %02x%02x\n",
 		(v >> 12) & 0x3f, (v >> 6) & 0x3f, v & 0x3f, buf[2], buf[3], buf[4], buf[5]);
 
 #if 0

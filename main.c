@@ -338,7 +338,7 @@ void write_data(
             fseek(f, 0, SEEK_SET);
             fread(buf, 1, bytes_to_write, f);
     }
-    fprintf(stderr, "%d bytes at 0x%x... ", bytes_to_write, start);
+    fprintf(stdout, "%d bytes at 0x%x... ", bytes_to_write, start);
 
     /* flashing MCU */
     int sent = pgm->write_range(pgm, part, buf, start, bytes_to_write, memtype);
@@ -346,8 +346,8 @@ void write_data(
         programmer_reset(pgm);
     }
 
-    fprintf(stderr, "OK\n");
-    fprintf(stderr, "Bytes written: %d\n", sent);
+    fprintf(stdout, "OK\n");
+    fprintf(stdout, "Bytes written: %d\n", sent);
     fclose(f);
 }
 
@@ -362,8 +362,8 @@ void verify_data(
 ) {
     FILE *f;
 
-    fprintf(stderr, "Verifing %d bytes at 0x%x... ", bytes_count, start);
-    fflush(stderr);
+    fprintf(stdout, "Verifing %d bytes at 0x%x... ", bytes_count, start);
+    fflush(stdout);
 
     int bytes_count_align = ((bytes_count-1)/256+1)*256; // Reading should be done in blocks of 256 bytes
     unsigned char *buf = malloc(bytes_count_align);
@@ -402,8 +402,8 @@ void verify_data(
     fclose(f);
 
     if(memcmp(buf, buf2, bytes_to_verify) == 0) {
-        fprintf(stderr, "OK\n");
-        fprintf(stderr, "Bytes verified: %d\n", bytes_to_verify);
+        fprintf(stdout, "OK\n");
+        fprintf(stdout, "Bytes verified: %d\n", bytes_to_verify);
     } else {
         fprintf(stderr, "FAILED\n");
         exit(-1);
@@ -552,7 +552,7 @@ int main(int argc, char **argv) {
 		if(!bytes_count_specified || bytes_count > part->ram_size) {
 			bytes_count = part->ram_size;
 		}
-		fprintf(stderr, "Determine RAM area\r\n");
+		fprintf(stdout, "Determine RAM area\r\n");
 		break;
 	case EEPROM:
 		if(!start_addr_specified) {
@@ -562,7 +562,7 @@ int main(int argc, char **argv) {
 		if(!bytes_count_specified || bytes_count > part->eeprom_size) {
 			bytes_count = part->eeprom_size;
 		}
-		fprintf(stderr, "Determine EEPROM area\r\n");
+		fprintf(stdout, "Determine EEPROM area\r\n");
 		break;
 	case FLASH:
 		if(!start_addr_specified) {
@@ -572,7 +572,7 @@ int main(int argc, char **argv) {
 		if(!bytes_count_specified || bytes_count > part->flash_size) {
 			bytes_count = part->flash_size;
 		}
-		fprintf(stderr, "Determine FLASH area\r\n");
+		fprintf(stdout, "Determine FLASH area\r\n");
 		break;
 	case OPT:
 		if(!start_addr_specified) {
@@ -583,7 +583,7 @@ int main(int argc, char **argv) {
 		if(!bytes_count_specified || bytes_count > opt_size) {
 			bytes_count = opt_size;
 		}
-		fprintf(stderr, "Determine OPT area\r\n");
+		fprintf(stdout, "Determine OPT area\r\n");
 		break;
 	case UNKNOWN:
 		;
@@ -606,12 +606,12 @@ int main(int argc, char **argv) {
 		fileformat = INTEL_HEX;
 	else if(is_ext(filename, ".s19") || is_ext(filename, ".s8") || is_ext(filename, ".srec"))
 		fileformat = MOTOROLA_S_RECORD;
-	fprintf(stderr, "Due to its file extension (or lack thereof), \"%s\" is considered as %s format!\n", filename, fileformat == INTEL_HEX ? "INTEL HEX" : (fileformat == MOTOROLA_S_RECORD ? "MOTOROLA S-RECORD" : "RAW BINARY"));
+	fprintf(stdout, "Due to its file extension (or lack thereof), \"%s\" is considered as %s format!\n", filename, fileformat == INTEL_HEX ? "INTEL HEX" : (fileformat == MOTOROLA_S_RECORD ? "MOTOROLA S-RECORD" : "RAW BINARY"));
 
 	FILE *f;
 	if(action == READ) {
-		fprintf(stderr, "Reading %d bytes at 0x%x... ", bytes_count, start);
-		fflush(stderr);
+		fprintf(stdout, "Reading %d bytes at 0x%x... ", bytes_count, start);
+		fflush(stdout);
 		int bytes_count_align = ((bytes_count-1)/256+1)*256; // Reading should be done in blocks of 256 bytes
 		unsigned char *buf = malloc(bytes_count_align);
 		if(!buf) spawn_error("malloc failed");
@@ -635,8 +635,8 @@ int main(int argc, char **argv) {
 			fwrite(buf, 1, bytes_count, f);
 		}
 		fclose(f);
-		fprintf(stderr, "OK\n");
-		fprintf(stderr, "Bytes received: %d\n", bytes_count);
+		fprintf(stdout, "OK\n");
+		fprintf(stdout, "Bytes received: %d\n", bytes_count);
 	} else if (action == VERIFY) {
         verify_data(filename, fileformat, bytes_count, bytes_count_specified, part, start, pgm);
 	} else if (action == WRITE) {
