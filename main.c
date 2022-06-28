@@ -126,6 +126,7 @@ void print_help_and_exit(const char *name, bool err) {
 	fprintf(stream, "\t-r <filename>  Read data from device to file\n");
 	fprintf(stream, "\t-w <filename>  Write data from file to device\n");
 	fprintf(stream, "\t-v <filename>  Verify data in device against file\n");
+	fprintf(stream, "\t-W <filename>  Write data from file to device and verify\n");
 	fprintf(stream, "\t-V             Print Date(YearMonthDay-Version) and Version format is IE: 20171204-1.0\n");
 	fprintf(stream, "\t-u             Unlock. Reset option bytes to factory default to remove write protection.\n");
 	exit(-err);
@@ -289,6 +290,126 @@ const stm8_device_t *get_part(const char *name)
 	return(0);
 }
 
+void programmer_reset(programmer_t *pgm) {
+    if(pgm->reset) {
+        // Restarting core (if applicable)
+        pgm->reset(pgm);
+    }
+}
+
+void write_data(
+    char* filename,
+    fileformat_t fileformat,
+    int bytes_count,
+    int bytes_count_specified,
+    const stm8_device_t *part,
+    unsigned int start,
+    programmer_t *pgm,
+    memtype_t memtype,
+    bool reset_programmer
+) {
+    FILE *f;
+
+    if(!(f = fopen(filename, (fileformat == RAW_BINARY) ? "rb" : "r")))
+        spawn_error("Failed to open file");
+    int bytes_count_align = ((bytes_count-1)/part->flash_block_size+1)*part->flash_block_size;
+    unsigned char *buf = malloc(bytes_count_align);
+    if(!buf) spawn_error("malloc failed");
+    memset(buf, 0, bytes_count_align); // Clean aligned buffer
+    int bytes_to_write;
+
+    /* reading bytes to RAM */
+    switch(fileformat)
+    {
+        case INTEL_HEX:
+            if((bytes_to_write = ihex_read(f, buf, start, start + bytes_count)) < 0)
+                exit(-1);
+            break;
+        case MOTOROLA_S_RECORD:
+            bytes_to_write = srec_read(f, buf, start, start + bytes_count);
+            break;
+        default:
+            fseek(f, 0L, SEEK_END);
+            bytes_to_write = ftell(f);
+            if(bytes_count_specified)
+                bytes_to_write = bytes_count;
+            else if(bytes_count < bytes_to_write)
+                bytes_to_write = bytes_count;
+            fseek(f, 0, SEEK_SET);
+            fread(buf, 1, bytes_to_write, f);
+    }
+    fprintf(stderr, "%d bytes at 0x%x... ", bytes_to_write, start);
+
+    /* flashing MCU */
+    int sent = pgm->write_range(pgm, part, buf, start, bytes_to_write, memtype);
+    if (reset_programmer) {
+        programmer_reset(pgm);
+    }
+
+    fprintf(stderr, "OK\n");
+    fprintf(stderr, "Bytes written: %d\n", sent);
+    fclose(f);
+}
+
+void verify_data(
+    char* filename,
+    fileformat_t fileformat,
+    int bytes_count,
+    int bytes_count_specified,
+    const stm8_device_t *part,
+    unsigned int start,
+    programmer_t *pgm
+) {
+    FILE *f;
+
+    fprintf(stderr, "Verifing %d bytes at 0x%x... ", bytes_count, start);
+    fflush(stderr);
+
+    int bytes_count_align = ((bytes_count-1)/256+1)*256; // Reading should be done in blocks of 256 bytes
+    unsigned char *buf = malloc(bytes_count_align);
+    if(!buf) spawn_error("malloc failed");
+    int recv = pgm->read_range(pgm, part, buf, start, bytes_count_align);
+    if(recv < bytes_count_align) {
+        fprintf(stderr, "\r\nRequested %d bytes but received only %d.\r\n", bytes_count_align, recv);
+        spawn_error("Failed to read MCU");
+    }
+
+    if(!(f = fopen(filename, (fileformat == RAW_BINARY) ? "rb" : "r")))
+        spawn_error("Failed to open file");
+    unsigned char *buf2 = malloc(bytes_count);
+    if(!buf2) spawn_error("malloc failed");
+    int bytes_to_verify;
+    /* reading bytes to RAM */
+    switch(fileformat)
+    {
+        case INTEL_HEX:
+            if((bytes_to_verify = ihex_read(f, buf2, start, start + bytes_count)) < 0)
+                exit(-1);
+            break;
+        case MOTOROLA_S_RECORD:
+            bytes_to_verify = srec_read(f, buf2, start, start + bytes_count);
+            break;
+        default:
+            fseek(f, 0L, SEEK_END);
+            bytes_to_verify = ftell(f);
+            if(bytes_count_specified)
+                bytes_to_verify = bytes_count;
+            else if(bytes_count < bytes_to_verify)
+                bytes_to_verify = bytes_count;
+            fseek(f, 0, SEEK_SET);
+            fread(buf2, 1, bytes_to_verify, f);
+    }
+    fclose(f);
+
+    if(memcmp(buf, buf2, bytes_to_verify) == 0) {
+        fprintf(stderr, "OK\n");
+        fprintf(stderr, "Bytes verified: %d\n", bytes_to_verify);
+    } else {
+        fprintf(stderr, "FAILED\n");
+        exit(-1);
+    }
+}
+
 int main(int argc, char **argv) {
 	unsigned int start;
 	int bytes_count = 0;
@@ -310,7 +431,7 @@ int main(int argc, char **argv) {
 	int i;
 	programmer_t *pgm = NULL;
 	const stm8_device_t *part = NULL;
-	while((c = getopt (argc, argv, "r:w:v:nc:S:p:d:s:b:luV")) != (char)-1) {
+	while((c = getopt (argc, argv, "r:w:W:v:nc:S:p:d:s:b:luV")) != (char)-1) {
 		switch(c) {
 			case 'c':
 				pgm_specified = true;
@@ -348,7 +469,11 @@ int main(int argc, char **argv) {
 				action = VERIFY;
 				strcpy(filename, optarg);
 				break;
-                        case 'u':
+			case 'W':
+				action = WRITE_VERIFY;
+				strcpy(filename, optarg);
+				break;
+            case 'u':
 				action = UNLOCK;
 				start  = 0x4800;
 				memtype = OPT;
@@ -513,94 +638,13 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "OK\n");
 		fprintf(stderr, "Bytes received: %d\n", bytes_count);
 	} else if (action == VERIFY) {
-		fprintf(stderr, "Verifing %d bytes at 0x%x... ", bytes_count, start);
-		fflush(stderr);
-
-		int bytes_count_align = ((bytes_count-1)/256+1)*256; // Reading should be done in blocks of 256 bytes
-		unsigned char *buf = malloc(bytes_count_align);
-		if(!buf) spawn_error("malloc failed");
-		int recv = pgm->read_range(pgm, part, buf, start, bytes_count_align);
-		if(recv < bytes_count_align) {
-			fprintf(stderr, "\r\nRequested %d bytes but received only %d.\r\n", bytes_count_align, recv);
-			spawn_error("Failed to read MCU");
-		}
-
-		if(!(f = fopen(filename, (fileformat == RAW_BINARY) ? "rb" : "r")))
-			spawn_error("Failed to open file");
-		unsigned char *buf2 = malloc(bytes_count);
-		if(!buf2) spawn_error("malloc failed");
-		int bytes_to_verify;
-		/* reading bytes to RAM */
-		switch(fileformat)
-		{
-		case INTEL_HEX:
-			if((bytes_to_verify = ihex_read(f, buf2, start, start + bytes_count)) < 0)
-			  exit(-1);
-			break;
-		case MOTOROLA_S_RECORD:
-			bytes_to_verify = srec_read(f, buf2, start, start + bytes_count);
-			break;
-		default:
-			fseek(f, 0L, SEEK_END);
-			bytes_to_verify = ftell(f);
-			if(bytes_count_specified)
-				bytes_to_verify = bytes_count;
-			else if(bytes_count < bytes_to_verify)
-				bytes_to_verify = bytes_count;
-			fseek(f, 0, SEEK_SET);
-			fread(buf2, 1, bytes_to_verify, f);
-		}
-		fclose(f);
-
-		if(memcmp(buf, buf2, bytes_to_verify) == 0) {
-			fprintf(stderr, "OK\n");
-			fprintf(stderr, "Bytes verified: %d\n", bytes_to_verify);
-		} else {
-			fprintf(stderr, "FAILED\n");
-			exit(-1);
-		}
-
-
+        verify_data(filename, fileformat, bytes_count, bytes_count_specified, part, start, pgm);
 	} else if (action == WRITE) {
-		if(!(f = fopen(filename, (fileformat == RAW_BINARY) ? "rb" : "r")))
-			spawn_error("Failed to open file");
-		int bytes_count_align = ((bytes_count-1)/part->flash_block_size+1)*part->flash_block_size;
-		unsigned char *buf = malloc(bytes_count_align);
-		if(!buf) spawn_error("malloc failed");
-		memset(buf, 0, bytes_count_align); // Clean aligned buffer
-		int bytes_to_write;
-
-		/* reading bytes to RAM */
-		switch(fileformat)
-		{
-		case INTEL_HEX:
-			if((bytes_to_write = ihex_read(f, buf, start, start + bytes_count)) < 0)
-			  exit(-1);
-			break;
-		case MOTOROLA_S_RECORD:
-			bytes_to_write = srec_read(f, buf, start, start + bytes_count);
-			break;
-		default:
-			fseek(f, 0L, SEEK_END);
-			bytes_to_write = ftell(f);
-			if(bytes_count_specified)
-				bytes_to_write = bytes_count;
-			else if(bytes_count < bytes_to_write)
-				bytes_to_write = bytes_count;
-			fseek(f, 0, SEEK_SET);
-			fread(buf, 1, bytes_to_write, f);
-		}
-		fprintf(stderr, "%d bytes at 0x%x... ", bytes_to_write, start);
-
-		/* flashing MCU */
-		int sent = pgm->write_range(pgm, part, buf, start, bytes_to_write, memtype);
-		if(pgm->reset) {
-			// Restarting core (if applicable)
-			pgm->reset(pgm);
-		}
-		fprintf(stderr, "OK\n");
-		fprintf(stderr, "Bytes written: %d\n", sent);
-		fclose(f);
+        write_data(filename, fileformat, bytes_count, bytes_count_specified, part, start, pgm, memtype, true);
+	} else if (action == WRITE_VERIFY) {
+        write_data(filename, fileformat, bytes_count, bytes_count_specified, part, start, pgm, memtype, false);
+        verify_data(filename, fileformat, bytes_count, bytes_count_specified, part, start, pgm);
+        programmer_reset(pgm);
 	} else if (action == UNLOCK) {
 		int bytes_to_write=part->option_bytes_size;
 

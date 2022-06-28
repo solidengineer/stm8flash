@@ -23,6 +23,7 @@ typedef enum {
     READ,
     WRITE,
     VERIFY,
+    WRITE_VERIFY,
     UNLOCK
 } action_t;
 
